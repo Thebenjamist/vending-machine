@@ -57,4 +57,19 @@ describe("makeChange", () => {
     });
     expect(makeChange(supply, 60)).toEqual({ 20: 3 });
   });
+
+  it("reconstructs a path without exceeding limited coin stock", () => {
+    const supply = supplyWith({
+      1: 1,
+      2: 2,
+      5: 1,
+      10: 0,
+      20: 0,
+      50: 0,
+      100: 0,
+      200: 0,
+    });
+
+    expect(makeChange(supply, 10)).toEqual({ 1: 1, 2: 2, 5: 1 });
+  });
 });

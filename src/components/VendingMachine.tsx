@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Box, Paper, Typography } from "@mui/material";
-import { formatPence } from "@/lib/coins";
 import { PRODUCTS, type Product } from "@/lib/products";
 import type { PurchaseResult } from "@/lib/types";
 import { MachineScrew } from "./MachineScrew";
@@ -19,13 +18,10 @@ export function VendingMachine() {
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [formErrors, setFormErrors] = useState<FormErrors>({});
 
-  function validateForm(product: Product): FormErrors {
+  function validateForm(): FormErrors {
     const next: FormErrors = {};
     if (!customerId.trim()) {
       next.customerId = "Enter your customer ID.";
-    }
-    if (paidPence < product.pricePence) {
-      next.paid = `Payment too low — need ${formatPence(product.pricePence)}, paid ${formatPence(paidPence)}.`;
     }
     return next;
   }
@@ -37,7 +33,7 @@ export function VendingMachine() {
 
     setOutcome(null);
 
-    const errors = validateForm(selected);
+    const errors = validateForm();
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) {
       return;

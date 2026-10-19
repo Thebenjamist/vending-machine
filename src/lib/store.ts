@@ -10,7 +10,12 @@ import {
   formatCannotMakeChangeMessage,
   suggestPayableAmounts,
 } from "./paymentSuggestions";
-import { isRateLimited, recordAttempt } from "./rateLimit";
+import {
+  isRateLimited,
+  pruneWindow,
+  RATE_LIMIT_WINDOW_MS,
+  recordAttempt,
+} from "./rateLimit";
 import type {
   CoinSupply,
   MachineState,
@@ -22,6 +27,7 @@ type StoreState = {
   supply: CoinSupply;
   cashBoxPence: number;
   attemptsByCustomer: Map<string, number[]>;
+  lastSweepAt: number;
 };
 
 function createInitialState(supply?: CoinSupply): StoreState {
@@ -29,6 +35,7 @@ function createInitialState(supply?: CoinSupply): StoreState {
     supply: supply ? cloneSupply(supply) : createFullSupply(),
     cashBoxPence: 0,
     attemptsByCustomer: new Map(),
+    lastSweepAt: 0,
   };
 }
 
@@ -89,13 +96,63 @@ function invalidInputMessage(
   return null;
 }
 
+/**
+ * Drop customers with no attempts left in the window, so the map can't grow forever.
+ * Runs at most once per window, so the cost is amortised rather than per request.
+ */
+function pruneIdleCustomers(state: StoreState, now: number): void {
+  if (Math.abs(now - state.lastSweepAt) < RATE_LIMIT_WINDOW_MS) {
+    return;
+  }
+  state.lastSweepAt = now;
+  for (const [id, timestamps] of state.attemptsByCustomer) {
+    pruneWindow(timestamps, now);
+    if (timestamps.length === 0) {
+      state.attemptsByCustomer.delete(id);
+    }
+  }
+}
+
+/** Customer IDs are case- and whitespace-insensitive ("Eve" === " eve "). */
+function normaliseCustomerId(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim().toLowerCase() : "";
+}
+
 export function purchase(
   request: PurchaseRequest,
   now: number = Date.now(),
 ): PurchaseResult {
-  const customerId = request.customerId?.trim() ?? "";
+  const customerId = normaliseCustomerId(request.customerId);
   const { pricePence, paidPence } = request;
 
+  // 1. Identity is the only thing we need before rate limiting.
+  if (!customerId) {
+    return {
+      ok: false,
+      reason: "INVALID_INPUT",
+      message: "Enter a customer ID.",
+      ...getMachineState(),
+    };
+  }
+
+  // 2. Rate limit before looking at price or payment (brief requirement).
+  const state = getStore();
+  const timestamps = state.attemptsByCustomer.get(customerId) ?? [];
+  if (isRateLimited(timestamps, now)) {
+    state.attemptsByCustomer.set(customerId, timestamps);
+    return {
+      ok: false,
+      reason: "RATE_LIMITED",
+      message: "Too many purchases — wait a moment and try again.",
+      ...getMachineState(),
+    };
+  }
+
+  recordAttempt(timestamps, now);
+  state.attemptsByCustomer.set(customerId, timestamps);
+  pruneIdleCustomers(state, now);
+
+  // 3. Now validate amounts. Invalid attempts still count towards the limit.
   const inputError = invalidInputMessage(customerId, pricePence, paidPence);
   if (inputError) {
     return {
@@ -105,25 +162,6 @@ export function purchase(
       ...getMachineState(),
     };
   }
-
-  const state = getStore();
-  let timestamps = state.attemptsByCustomer.get(customerId);
-  if (!timestamps) {
-    timestamps = [];
-    state.attemptsByCustomer.set(customerId, timestamps);
-  }
-
-  if (isRateLimited(timestamps, now)) {
-    return {
-      ok: false,
-      reason: "RATE_LIMITED",
-      message: "Too many purchases — wait a moment and try again.",
-      ...getMachineState(),
-    };
-  }
-
-  // Count this attempt before business-rule checks so spam still burns the window.
-  recordAttempt(timestamps, now);
 
   if (paidPence < pricePence) {
     return {

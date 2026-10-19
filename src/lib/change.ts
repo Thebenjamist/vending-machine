@@ -1,15 +1,16 @@
 import { DENOMINATIONS } from "./coins";
-import type { CoinCounts, CoinSupply, Denomination } from "./types";
-
-type Choice = {
-  from: number;
-  denom: Denomination;
-  count: number;
-};
+import type { CoinCounts, CoinSupply } from "./types";
 
 /**
  * Fewest coins to make `amount` pence from limited hopper stock.
- * Uses bounded coin-change DP (one group pass per denomination).
+ *
+ * Bounded coin-change DP over denominations:
+ *   minCoins[i][a] = fewest coins making `a` using only the first i denominations.
+ *   For denomination i, try using k = 0..available of it.
+ *
+ * Each denomination keeps its own row (and `used[i][a]` = how many of it the
+ * best answer takes), so the walk-back reads exactly one decision per
+ * denomination and can never hand out more coins than the hopper holds.
  */
 export function makeChange(supply: CoinSupply, amount: number): CoinCounts | null {
   if (amount === 0) {
@@ -20,51 +21,42 @@ export function makeChange(supply: CoinSupply, amount: number): CoinCounts | nul
   }
 
   const INF = Number.POSITIVE_INFINITY;
-  const minCoins = new Array<number>(amount + 1).fill(INF);
-  const choice = new Array<Choice | null>(amount + 1).fill(null);
-  minCoins[0] = 0;
+  const n = DENOMINATIONS.length;
+  const minCoins: number[][] = Array.from({ length: n + 1 }, () =>
+    new Array<number>(amount + 1).fill(INF),
+  );
+  const used: number[][] = Array.from({ length: n + 1 }, () =>
+    new Array<number>(amount + 1).fill(0),
+  );
+  minCoins[0][0] = 0;
 
-  for (const denom of DENOMINATIONS) {
+  for (let i = 1; i <= n; i += 1) {
+    const denom = DENOMINATIONS[i - 1];
     const available = supply[denom] ?? 0;
-    if (available <= 0) {
-      continue;
-    }
-
-    const prev = minCoins.slice();
 
     for (let a = 0; a <= amount; a += 1) {
-      if (prev[a] === INF) {
-        continue;
-      }
-
-      for (let k = 1; k <= available; k += 1) {
-        const nxt = a + k * denom;
-        if (nxt > amount) {
-          break;
-        }
-
-        const coins = prev[a] + k;
-        if (coins < minCoins[nxt]) {
-          minCoins[nxt] = coins;
-          choice[nxt] = { from: a, denom, count: k };
+      for (let k = 0; k <= available && k * denom <= a; k += 1) {
+        const coins = minCoins[i - 1][a - k * denom] + k;
+        if (coins < minCoins[i][a]) {
+          minCoins[i][a] = coins;
+          used[i][a] = k;
         }
       }
     }
   }
 
-  if (minCoins[amount] === INF) {
+  if (minCoins[n][amount] === INF) {
     return null;
   }
 
   const counts: CoinCounts = {};
-  let cur = amount;
-  while (cur > 0) {
-    const step = choice[cur];
-    if (!step) {
-      return null;
+  let remaining = amount;
+  for (let i = n; i >= 1; i -= 1) {
+    const k = used[i][remaining];
+    if (k > 0) {
+      counts[DENOMINATIONS[i - 1]] = k;
     }
-    counts[step.denom] = (counts[step.denom] ?? 0) + step.count;
-    cur = step.from;
+    remaining -= k * DENOMINATIONS[i - 1];
   }
 
   return counts;

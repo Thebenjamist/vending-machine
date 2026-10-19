@@ -3,8 +3,26 @@ export const RATE_LIMIT_WINDOW_MS = 3000;
 
 /**
  * Sliding-window rate limiter: allow at most `max` events in the last `windowMs`.
- * Mutates `timestamps` in place (prunes expired entries).
+ * Prunes `timestamps` in place, so callers can drop customers whose list empties.
  */
+export function pruneWindow(
+  timestamps: number[],
+  now: number,
+  windowMs: number = RATE_LIMIT_WINDOW_MS,
+): void {
+  const cutoff = now - windowMs;
+  // Keep only attempts inside (cutoff, now]. Anything "in the future" means the
+  // clock went backwards, so drop it rather than locking the customer out.
+  let write = 0;
+  for (const t of timestamps) {
+    if (t > cutoff && t <= now) {
+      timestamps[write] = t;
+      write += 1;
+    }
+  }
+  timestamps.length = write;
+}
+
 export function isRateLimited(
   timestamps: number[],
   now: number,
@@ -15,26 +33,6 @@ export function isRateLimited(
   return timestamps.length >= max;
 }
 
-export function recordAttempt(
-  timestamps: number[],
-  now: number,
-  windowMs: number = RATE_LIMIT_WINDOW_MS,
-): void {
-  pruneWindow(timestamps, now, windowMs);
+export function recordAttempt(timestamps: number[], now: number): void {
   timestamps.push(now);
-}
-
-export function pruneWindow(
-  timestamps: number[],
-  now: number,
-  windowMs: number = RATE_LIMIT_WINDOW_MS,
-): void {
-  const cutoff = now - windowMs;
-  let firstValid = 0;
-  while (firstValid < timestamps.length && timestamps[firstValid] <= cutoff) {
-    firstValid += 1;
-  }
-  if (firstValid > 0) {
-    timestamps.splice(0, firstValid);
-  }
 }

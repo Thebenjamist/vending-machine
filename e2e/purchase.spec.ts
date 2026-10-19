@@ -32,7 +32,7 @@ test("exact payment shows no change messaging", async ({ page }) => {
   await expect(page.getByTestId("change-coins")).toHaveCount(0);
 });
 
-test("insufficient funds is caught client-side before purchase", async ({ page }) => {
+test("insufficient funds is refused by the server and leaves the hopper untouched", async ({ page }) => {
   await page.goto("/");
 
   await page.getByTestId("product-juice").click();
@@ -40,9 +40,9 @@ test("insufficient funds is caught client-side before purchase", async ({ page }
   await page.getByTestId("pay-custom").fill("0.50");
   await page.getByTestId("vend-button").click();
 
-  await expect(page.getByTestId("paid-error")).toContainText("Payment too low");
+  await expect(page.getByTestId("outcome-error-INSUFFICIENT_FUNDS")).toContainText("Payment too low");
 
-  // Hopper must be untouched — client validation never hit the API.
+  // Hopper must be untouched by the refused purchase.
   await page.goto("/status");
   await expect(page.getByTestId("service-panel")).toBeVisible();
 
@@ -114,6 +114,5 @@ test("payment stays locked until a product is selected", async ({ page }) => {
 
   await page.getByTestId("vend-button").click();
   await expect(page.getByTestId("customer-id-error")).toContainText("customer ID");
-  await expect(page.getByTestId("paid-error")).toContainText("Payment too low");
   await expect(page.getByTestId("vend-button")).toBeEnabled();
 });

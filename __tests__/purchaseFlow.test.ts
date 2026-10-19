@@ -165,4 +165,35 @@ describe("purchase flow", () => {
     expect(result).toMatchObject({ ok: false, reason: "INVALID_INPUT" });
     expect(getMachineState().supply).toEqual(createFullSupply());
   });
+
+  it("rate limits invalid requests too, before validating price or payment", () => {
+    const t0 = 30_000;
+    purchase({ customerId: "dan", pricePence: 100, paidPence: 100 }, t0);
+    purchase({ customerId: "dan", pricePence: 100, paidPence: 100 }, t0 + 1);
+    purchase({ customerId: "dan", pricePence: -5, paidPence: 100 }, t0 + 2);
+
+    const result = purchase({ customerId: "dan", pricePence: -5, paidPence: 100 }, t0 + 3);
+    expect(result).toMatchObject({ ok: false, reason: "RATE_LIMITED" });
+  });
+
+  it("treats customer IDs case-insensitively", () => {
+    const t0 = 40_000;
+    purchase({ customerId: "Eve", pricePence: 100, paidPence: 100 }, t0);
+    purchase({ customerId: "eve", pricePence: 100, paidPence: 100 }, t0 + 1);
+    purchase({ customerId: " EVE ", pricePence: 100, paidPence: 100 }, t0 + 2);
+
+    const result = purchase({ customerId: "eVe", pricePence: 100, paidPence: 100 }, t0 + 3);
+    expect(result).toMatchObject({ ok: false, reason: "RATE_LIMITED" });
+  });
+
+  it("forgets customers once their attempts expire", () => {
+    for (let i = 0; i < 1000; i += 1) {
+      purchase({ customerId: `user${i}`, pricePence: 100, paidPence: 100 }, 50_000 + i);
+    }
+    // Next window: one request triggers the sweep.
+    purchase({ customerId: "late", pricePence: 100, paidPence: 100 }, 60_000);
+    const store = (globalThis as { __modoVendStore?: { attemptsByCustomer: Map<string, number[]> } })
+      .__modoVendStore!;
+    expect(store.attemptsByCustomer.size).toBe(1);
+  });
 });

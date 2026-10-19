@@ -43,3 +43,23 @@ describe("rateLimit", () => {
     expect(isRateLimited(bob, now + 3)).toBe(false);
   });
 });
+
+describe("rateLimit edge cases", () => {
+  it("frees a slot exactly when the oldest attempt is 3 seconds old", () => {
+    const timestamps: number[] = [];
+    recordAttempt(timestamps, 0);
+    recordAttempt(timestamps, 1);
+    recordAttempt(timestamps, 2);
+    expect(isRateLimited(timestamps, 2999)).toBe(true);
+    expect(isRateLimited(timestamps, 3000)).toBe(false);
+  });
+
+  it("does not lock a customer out if the clock goes backwards", () => {
+    const timestamps: number[] = [];
+    recordAttempt(timestamps, 3_600_000);
+    recordAttempt(timestamps, 3_600_001);
+    recordAttempt(timestamps, 3_600_002);
+    // Clock jumps back an hour: those attempts are now "in the future".
+    expect(isRateLimited(timestamps, 5_000)).toBe(false);
+  });
+});
