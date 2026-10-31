@@ -16,16 +16,23 @@ export async function POST(request: Request) {
     );
   }
 
-  const { customerId, pricePence, paidPence } = (body ?? {}) as {
+  const {
+    customerId,
+    pricePence,
+    paidPence,
+    request_id: requestId,
+  } = (body ?? {}) as {
     customerId?: string;
     pricePence?: number;
     paidPence?: number;
+    request_id?: string;
   };
 
   const result = purchase({
     customerId: customerId ?? "",
     pricePence: pricePence as number,
     paidPence: paidPence as number,
+    requestId: requestId ?? undefined,
   });
 
   const status = result.ok

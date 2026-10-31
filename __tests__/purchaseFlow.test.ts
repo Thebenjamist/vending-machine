@@ -20,8 +20,8 @@ describe("purchase flow", () => {
 
     expect(result.change).toEqual({});
     expect(result.changePence).toBe(0);
-    expect(result.supply).toEqual(before.supply);
-    expect(result.cashBoxPence).toBe(120);
+    expect(getMachineState().supply).toEqual(before.supply);
+    expect(getMachineState().cashBoxPence).toBe(120);
   });
 
   it("dispenses fewest-coin change and decrements the hopper", () => {
@@ -36,10 +36,11 @@ describe("purchase flow", () => {
 
     expect(result.changePence).toBe(80);
     expect(result.change).toEqual({ 50: 1, 20: 1, 10: 1 });
-    expect(result.supply[50]).toBe(9);
-    expect(result.supply[20]).toBe(9);
-    expect(result.supply[10]).toBe(9);
-    expect(result.cashBoxPence).toBe(200);
+    const state = getMachineState();
+    expect(state.supply[50]).toBe(9);
+    expect(state.supply[20]).toBe(9);
+    expect(state.supply[10]).toBe(9);
+    expect(state.cashBoxPence).toBe(200);
   });
 
   it("rejects insufficient funds without mutating state", () => {

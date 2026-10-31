@@ -116,3 +116,105 @@ test("payment stays locked until a product is selected", async ({ page }) => {
   await expect(page.getByTestId("customer-id-error")).toContainText("customer ID");
   await expect(page.getByTestId("vend-button")).toBeEnabled();
 });
+
+test.describe("lost response", () => {
+  test("retry reuses the request_id and original submission, booking once", async ({ page, request }) => {
+    const bodies: Record<string, unknown>[] = [];
+    let dropNext = true;
+    await page.route("**/api/purchase", async (route) => {
+      bodies.push(route.request().postDataJSON());
+      if (dropNext) {
+        dropNext = false;
+        await route.fetch(); // server books the order, client never hears back
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/");
+    await page.getByTestId("product-water").click();
+    await page.getByTestId("customer-id").fill("frank");
+    await page.getByTestId("pay-add-200").click();
+    await page.getByTestId("vend-button").click();
+
+    await expect(page.getByTestId("outcome-network-error")).toBeVisible();
+    await expect(page.getByTestId("vend-button")).toBeDisabled();
+    await expect(page.getByTestId("outcome-success")).toHaveCount(0);
+    await expect(page.getByTestId("customer-id")).toBeDisabled();
+    await expect(page.getByTestId("pay-clear")).toBeDisabled();
+
+    // New purchase actions are locked, but extra inserted coins still accumulate.
+    await expect(page.getByTestId("product-cola")).toBeDisabled();
+    await page.getByTestId("pay-add-50").click();
+    await expect(page.getByTestId("pay-custom")).toHaveValue("2.50");
+    expect(bodies).toHaveLength(1); // no automatic retry
+
+    await page.getByTestId("retry-button").click();
+    await expect(page.getByTestId("outcome-success")).toContainText("Still Water");
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toEqual(bodies[0]);
+    expect(bodies[0]).toMatchObject({
+      customerId: "frank",
+      pricePence: 120,
+      paidPence: 200,
+    });
+    expect(typeof bodies[0].request_id).toBe("string");
+
+    // Only the submitted £2.00 is spent; the extra 50p remains.
+    await expect(page.getByTestId("pay-custom")).toHaveValue("0.50");
+
+    const machine = await (await request.get("/api/machine")).json();
+    expect(machine.cashBoxPence).toBe(200);
+  });
+
+  test("retry succeeds when the request never reached the server", async ({ page, request }) => {
+    let dropNext = true;
+    await page.route("**/api/purchase", async (route) => {
+      if (dropNext) {
+        dropNext = false;
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/");
+    await completePurchase(page, {
+      productTestId: "product-cola",
+      customerId: "gina",
+      payExact: true,
+    });
+    await expect(page.getByTestId("outcome-network-error")).toBeVisible();
+
+    await page.getByTestId("retry-button").click();
+    await expect(page.getByTestId("outcome-success")).toBeVisible();
+
+    const machine = await (await request.get("/api/machine")).json();
+    expect(machine.cashBoxPence).toBe(100);
+  });
+
+  test("a new purchase after success uses a fresh request_id", async ({ page }) => {
+    const ids: string[] = [];
+    await page.route("**/api/purchase", async (route) => {
+      ids.push(route.request().postDataJSON().request_id);
+      await route.continue();
+    });
+
+    await page.goto("/");
+    await completePurchase(page, {
+      productTestId: "product-cola",
+      customerId: "hana",
+      payExact: true,
+    });
+    await expect(page.getByTestId("outcome-success")).toBeVisible();
+
+    await page.getByTestId("pay-exact").click();
+    await page.getByTestId("vend-button").click();
+    await expect(page.getByTestId("outcome-success")).toBeVisible();
+
+    await expect.poll(() => ids.length).toBe(2);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+});

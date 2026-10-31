@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, Chip, Stack, Typography } from "@mui/material";
+import { Box, Button, Chip, Stack, Typography } from "@mui/material";
 import { formatDenomination, formatPence, nonZeroChange } from "@/lib/coins";
 import type { CoinCounts, PurchaseReason } from "@/lib/types";
 
@@ -15,18 +15,28 @@ export type Outcome =
       kind: "error";
       reason: PurchaseReason;
       message: string;
+    }
+  | {
+      kind: "network-error";
+      itemName: string;
+      paidPence: number;
     };
 
 type Props = {
   outcome: Outcome | null;
   idleMessage?: string;
+  onRetry?: () => void;
+  retrying?: boolean;
 };
 
 export function OutcomePanel({
   outcome,
   idleMessage = "Select a product to begin",
+  onRetry,
+  retrying = false,
 }: Props) {
-  const isError = outcome?.kind === "error";
+  const isError =
+    outcome?.kind === "error" || outcome?.kind === "network-error";
   const isSuccess = outcome?.kind === "success";
 
   return (
@@ -117,6 +127,35 @@ export function OutcomePanel({
         >
           {outcome.message}
         </Typography>
+      )}
+
+      {outcome?.kind === "network-error" && (
+        <Box>
+          <Typography
+            data-testid="outcome-network-error"
+            sx={{
+              color: "#FFE0E0",
+              fontSize: "0.9375rem",
+              fontWeight: 700,
+              lineHeight: 1.35,
+            }}
+          >
+            Connection lost — we can&apos;t confirm your {outcome.itemName}{" "}
+            purchase ({formatPence(outcome.paidPence)}). Retry will use this
+            amount; extra coins stay available.
+          </Typography>
+          <Button
+            size="small"
+            variant="contained"
+            color="error"
+            data-testid="retry-button"
+            disabled={retrying}
+            onClick={onRetry}
+            sx={{ mt: 1.25 }}
+          >
+            {retrying ? "Retrying…" : "Retry"}
+          </Button>
+        </Box>
       )}
     </Box>
   );

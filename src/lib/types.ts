@@ -10,20 +10,21 @@ export type PurchaseReason =
   | "RATE_LIMITED"
   | "INSUFFICIENT_FUNDS"
   | "CANNOT_MAKE_CHANGE"
-  | "INVALID_INPUT";
+  | "INVALID_INPUT"
+  | "REQUEST_ID_CONFLICT";
 
 export type PurchaseRequest = {
   customerId: string;
   pricePence: number;
   paidPence: number;
+  /** Caller-supplied idempotency key; repeats return the original result. */
+  requestId?: string;
 };
 
 export type PurchaseSuccess = {
   ok: true;
   change: CoinCounts;
   changePence: number;
-  supply: CoinSupply;
-  cashBoxPence: number;
 };
 
 export type PurchaseFailure = {
@@ -34,8 +35,6 @@ export type PurchaseFailure = {
   changePence?: number;
   /** Payable amounts that would work with current hopper (exact first). */
   suggestedPayments?: number[];
-  supply: CoinSupply;
-  cashBoxPence: number;
 };
 
 export type PurchaseResult = PurchaseSuccess | PurchaseFailure;

@@ -10,6 +10,13 @@ import { type Outcome } from "./OutcomePanel";
 import { PaymentPanel, type FormErrors } from "./PaymentPanel";
 import { ProductGrid } from "./ProductGrid";
 
+type PendingSubmission = {
+  requestId: string;
+  product: Product;
+  customerId: string;
+  paidPence: number;
+};
+
 export function VendingMachine() {
   const [selected, setSelected] = useState<Product | null>(null);
   const [customerId, setCustomerId] = useState("");
@@ -17,6 +24,9 @@ export function VendingMachine() {
   const [loading, setLoading] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [formErrors, setFormErrors] = useState<FormErrors>({});
+  // Frozen at submit time so a retry can't pick up later edits.
+  const [pending, setPending] = useState<PendingSubmission | null>(null);
+  const awaitingRetry = pending !== null;
 
   function validateForm(): FormErrors {
     const next: FormErrors = {};
@@ -40,24 +50,55 @@ export function VendingMachine() {
     }
 
     setLoading(true);
+    const submission: PendingSubmission = {
+      requestId: crypto.randomUUID(),
+      product: selected,
+      customerId: customerId.trim(),
+      paidPence,
+    };
+    await submit(submission);
+  }
 
+  async function handleRetry() {
+    if (loading || !pending) {
+      return;
+    }
+    setLoading(true);
+    await submit(pending);
+  }
+
+  async function submit(submission: PendingSubmission) {
     try {
-      const response = await fetch("/api/purchase", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          customerId: customerId.trim(),
-          pricePence: selected.pricePence,
-          paidPence,
-        }),
-      });
+      let result: PurchaseResult;
+      try {
+        const response = await fetch("/api/purchase", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customerId: submission.customerId,
+            pricePence: submission.product.pricePence,
+            paidPence: submission.paidPence,
+            request_id: submission.requestId,
+          }),
+        });
+        result = (await response.json()) as PurchaseResult;
+      } catch {
+        setPending(submission);
+        setOutcome({
+          kind: "network-error",
+          itemName: submission.product.name,
+          paidPence: submission.paidPence,
+        });
+        return;
+      }
 
-      const result = (await response.json()) as PurchaseResult;
-
+      setPending(null);
       if (result.ok) {
+        // Only the submitted amount is spent; coins added while waiting remain.
+        setPaidPence((current) => Math.max(0, current - submission.paidPence));
         setOutcome({
           kind: "success",
-          itemName: selected.name,
+          itemName: submission.product.name,
           change: result.change,
           changePence: result.changePence,
         });
@@ -68,12 +109,6 @@ export function VendingMachine() {
           message: result.message,
         });
       }
-    } catch {
-      setOutcome({
-        kind: "error",
-        reason: "INVALID_INPUT",
-        message: "Something went wrong. Please try again.",
-      });
     } finally {
       setLoading(false);
     }
@@ -124,7 +159,11 @@ export function VendingMachine() {
           <ProductGrid
             products={PRODUCTS}
             selectedId={selected?.id ?? null}
+            disabled={awaitingRetry}
             onSelect={(product) => {
+              if (awaitingRetry) {
+                return;
+              }
               setSelected(product);
               setPaidPence(0);
               setOutcome(null);
@@ -146,6 +185,7 @@ export function VendingMachine() {
           >
             <PaymentPanel
               locked={selected === null}
+              awaitingRetry={awaitingRetry}
               customerId={customerId}
               onCustomerIdChange={(value) => {
                 setCustomerId(value);
@@ -162,6 +202,7 @@ export function VendingMachine() {
                 );
               }}
               onVend={handleVend}
+              onRetry={handleRetry}
               loading={loading}
               errors={formErrors}
               outcome={outcome}

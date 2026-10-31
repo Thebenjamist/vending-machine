@@ -28,7 +28,19 @@ type StoreState = {
   cashBoxPence: number;
   attemptsByCustomer: Map<string, number[]>;
   lastSweepAt: number;
+  completedByRequest: Map<string, CompletedRequest>;
 };
+
+type CompletedRequest = {
+  pricePence: number;
+  paidPence: number;
+  result: PurchaseResult;
+  at: number;
+};
+
+/** How long a request_id is remembered for replay. */
+export const REQUEST_ID_TTL_MS = 10 * 60 * 1000;
+const MAX_REQUEST_ID_LENGTH = 128;
 
 function createInitialState(supply?: CoinSupply): StoreState {
   return {
@@ -36,6 +48,7 @@ function createInitialState(supply?: CoinSupply): StoreState {
     cashBoxPence: 0,
     attemptsByCustomer: new Map(),
     lastSweepAt: 0,
+    completedByRequest: new Map(),
   };
 }
 
@@ -111,6 +124,11 @@ function pruneIdleCustomers(state: StoreState, now: number): void {
       state.attemptsByCustomer.delete(id);
     }
   }
+  for (const [key, entry] of state.completedByRequest) {
+    if (now - entry.at >= REQUEST_ID_TTL_MS) {
+      state.completedByRequest.delete(key);
+    }
+  }
 }
 
 /** Customer IDs are case- and whitespace-insensitive ("Eve" === " eve "). */
@@ -124,14 +142,69 @@ export function purchase(
 ): PurchaseResult {
   const customerId = normaliseCustomerId(request.customerId);
   const { pricePence, paidPence } = request;
+  const requestId = request.requestId;
 
+  if (
+    requestId !== undefined &&
+    (typeof requestId !== "string" ||
+      requestId.length === 0 ||
+      requestId.length > MAX_REQUEST_ID_LENGTH)
+  ) {
+    return {
+      ok: false,
+      reason: "INVALID_INPUT",
+      message: "Invalid request ID.",
+    };
+  }
+
+  // Replay check runs before rate limiting so a retry is never throttled or re-counted.
+  const requestKey =
+    requestId !== undefined && customerId
+      ? `${customerId}\u0000${requestId}`
+      : null;
+  if (requestKey) {
+    const prior = getStore().completedByRequest.get(requestKey);
+    if (prior && now - prior.at < REQUEST_ID_TTL_MS) {
+      if (prior.pricePence !== pricePence || prior.paidPence !== paidPence) {
+        return {
+          ok: false,
+          reason: "REQUEST_ID_CONFLICT",
+          message: "This request ID was already used for a different purchase.",
+        };
+      }
+      return prior.result;
+    }
+  }
+
+  const result = processPurchase(customerId, pricePence, paidPence, now);
+
+  const replayable =
+    result.ok ||
+    result.reason === "INSUFFICIENT_FUNDS" ||
+    result.reason === "CANNOT_MAKE_CHANGE";
+  if (requestKey && replayable) {
+    getStore().completedByRequest.set(requestKey, {
+      pricePence,
+      paidPence,
+      result,
+      at: now,
+    });
+  }
+  return result;
+}
+
+function processPurchase(
+  customerId: string,
+  pricePence: number,
+  paidPence: number,
+  now: number,
+): PurchaseResult {
   // 1. Identity is the only thing we need before rate limiting.
   if (!customerId) {
     return {
       ok: false,
       reason: "INVALID_INPUT",
       message: "Enter a customer ID.",
-      ...getMachineState(),
     };
   }
 
@@ -144,7 +217,6 @@ export function purchase(
       ok: false,
       reason: "RATE_LIMITED",
       message: "Too many purchases — wait a moment and try again.",
-      ...getMachineState(),
     };
   }
 
@@ -159,7 +231,6 @@ export function purchase(
       ok: false,
       reason: "INVALID_INPUT",
       message: inputError,
-      ...getMachineState(),
     };
   }
 
@@ -168,7 +239,6 @@ export function purchase(
       ok: false,
       reason: "INSUFFICIENT_FUNDS",
       message: `Payment too low — need more to cover the price.`,
-      ...getMachineState(),
     };
   }
 
@@ -188,7 +258,6 @@ export function purchase(
       message: formatCannotMakeChangeMessage(changePence, suggestedPayments),
       changePence,
       suggestedPayments,
-      ...getMachineState(),
     };
   }
 
@@ -199,6 +268,5 @@ export function purchase(
     ok: true,
     change,
     changePence,
-    ...getMachineState(),
   };
 }

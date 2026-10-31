@@ -10,12 +10,14 @@ export type FormErrors = {
 };
 
 type Props = {
+  awaitingRetry: boolean;
   customerId: string;
   onCustomerIdChange: (value: string) => void;
   pricePence: number | null;
   paidPence: number;
   onPaidPenceChange: (value: number) => void;
   onVend: () => void;
+  onRetry: () => void;
   loading: boolean;
   errors: FormErrors;
   locked: boolean;
@@ -26,12 +28,14 @@ type Props = {
 const QUICK_ADDS = [20, 50, 100, 200] as const;
 
 export function PaymentPanel({
+  awaitingRetry,
   customerId,
   onCustomerIdChange,
   pricePence,
   paidPence,
   onPaidPenceChange,
   onVend,
+  onRetry,
   loading,
   errors,
   locked,
@@ -86,7 +90,7 @@ export function PaymentPanel({
             value={customerId}
             onChange={(e) => onCustomerIdChange(e.target.value)}
             error={Boolean(errors.customerId)}
-            disabled={locked}
+            disabled={locked || awaitingRetry}
             slotProps={{
               htmlInput: { "data-testid": "customer-id" },
             }}
@@ -169,7 +173,7 @@ export function PaymentPanel({
               size="small"
               variant="text"
               data-testid="pay-clear"
-              disabled={locked}
+              disabled={locked || awaitingRetry}
               onClick={() => onPaidPenceChange(0)}
             >
               Clear
@@ -183,13 +187,18 @@ export function PaymentPanel({
           variant="contained"
           color="primary"
           data-testid="vend-button"
-          disabled={locked || loading}
+          disabled={locked || loading || outcome?.kind === "network-error"}
           onClick={onVend}
         >
           {loading ? "Buying…" : "Buy"}
         </Button>
 
-        <OutcomePanel outcome={outcome} idleMessage={idleMessage} />
+        <OutcomePanel
+          outcome={outcome}
+          idleMessage={idleMessage}
+          onRetry={onRetry}
+          retrying={loading}
+        />
       </Stack>
 
       {locked && (

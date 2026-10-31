@@ -8,10 +8,11 @@ import { formatPence } from "@/lib/coins";
 type Props = {
   products: Product[];
   selectedId: string | null;
+  disabled?: boolean;
   onSelect: (product: Product) => void;
 };
 
-export function ProductGrid({ products, selectedId, onSelect }: Props) {
+export function ProductGrid({ products, selectedId, disabled = false, onSelect }: Props) {
   return (
     <Box
       data-testid="product-grid"
@@ -45,6 +46,8 @@ export function ProductGrid({ products, selectedId, onSelect }: Props) {
               component="button"
               type="button"
               data-testid={`product-${product.id}`}
+              disabled={disabled}
+              aria-disabled={disabled}
               onClick={() => onSelect(product)}
               sx={{
                 appearance: "none",
@@ -57,7 +60,7 @@ export function ProductGrid({ products, selectedId, onSelect }: Props) {
                 borderRadius: 1.75,
                 p: 0,
                 overflow: "hidden",
-                cursor: "pointer",
+                cursor: disabled ? "not-allowed" : "pointer",
                 textAlign: "left",
                 background: selected
                   ? "linear-gradient(180deg, #FFF8EE 0%, #F3E7D2 100%)"
@@ -70,12 +73,19 @@ export function ProductGrid({ products, selectedId, onSelect }: Props) {
                 transform: selected ? "scale(1.03)" : "scale(1)",
                 transformOrigin: "center",
                 filter: selected ? "none" : "saturate(0.92)",
+                opacity: disabled ? 0.75 : 1,
                 "&:hover": {
-                  transform: selected ? "scale(1.03)" : "scale(1.02)",
-                  filter: "none",
-                  boxShadow: selected
-                    ? "0 0 0 3px rgba(201,132,47,0.28), 0 8px 18px rgba(28,35,43,0.16)"
-                    : "0 4px 12px rgba(28,35,43,0.14)",
+                  transform:
+                    disabled || selected ? "scale(1.03)" : "scale(1.02)",
+                  filter: disabled ? "saturate(0.92)" : "none",
+                  boxShadow:
+                    disabled
+                      ? selected
+                        ? "0 0 0 3px rgba(201,132,47,0.28), 0 8px 18px rgba(28,35,43,0.16)"
+                        : "0 2px 6px rgba(0,0,0,0.08)"
+                      : selected
+                        ? "0 0 0 3px rgba(201,132,47,0.28), 0 8px 18px rgba(28,35,43,0.16)"
+                        : "0 4px 12px rgba(28,35,43,0.14)",
                 },
               }}
             >
